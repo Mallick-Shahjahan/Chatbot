@@ -1,5 +1,4 @@
 import streamlit as st
-import streamlit as st
 import time, io, os, sys, re
 from gtts import gTTS
 import numpy as np
@@ -8,6 +7,18 @@ import feedparser
 import pyjokes
 import ast
 import math
+
+# for browser recording
+try:
+    from streamlit_webrtc import webrtc_streamer, WebRtcMode
+    import av
+    WEBRTC_AVAILABLE = True
+except Exception:
+    WEBRTC_AVAILABLE = False
+
+import numpy as np
+import soundfile as sf  
+
 
 def get_elevenlabs_key():
     # 1) Try Streamlit Secrets
@@ -281,7 +292,7 @@ def record_sound(duration=RECORD_DURATION, samplerate=SAMPLERATE, channels=CHANN
 
     except Exception as e:
         print("[record_sound] Exception:", e)
-        return False, f"Recording failed: {e}"
+        return False, f"Recording failed: {e}" 
 
 def safe_eval_expr(expr: str):
     allowed_nodes = (
@@ -456,27 +467,72 @@ def get_bot_reply(user_text: str):
 
     return "I heard: " + user_text + ". You can ask about weather, news, jokes, or general knowledge."
 
-if listen_btn:
-    status.info("Recording...")
-    # Record (blocking)
-    ok, wav = record_sound(duration=record_dur)
-    if not ok:
-        status.error(wav)
-    else:
-        status.info("Recognizing...")
-        ok2, text = recognize_from_bytes(wav, samplerate=SAMPLERATE)
-        if not ok2:
-            status.error(text)
+# ---------- Voice input (browser or local) ----------
+st.markdown("### Voice input")
+
+if WEBRTC_AVAILABLE:
+    st.info("Using browser microphone (WebRTC).")
+    webrtc_ctx = webrtc_streamer(
+        key="voice-input",
+        mode=WebRtcMode.SENDONLY,
+        media_stream_constraints={"audio": True, "video": False},
+        async_processing=True,
+    )
+
+    if webrtc_ctx and webrtc_ctx.state.playing:
+        st.write("Recording... speak now.")
+        # Try to fetch frames (non-blocking); you may tune timeout
+        if webrtc_ctx.audio_receiver:
+            try:
+                frames = webrtc_ctx.audio_receiver.get_frames(timeout=1)
+                if frames:
+                    # convert frames to numpy and combine
+                    audio_arrays = [f.to_ndarray() for f in frames]
+                    audio_np = np.concatenate(audio_arrays, axis=0)
+
+                    # write WAV bytes (48k typical from browser)
+                    buf = io.BytesIO()
+                    sf.write(buf, audio_np, samplerate=48000, format="WAV")
+                    wav_bytes = buf.getvalue()
+
+                    # Recognize and reply (reuses your existing function)
+                    ok, text = recognize_from_bytes(wav_bytes, samplerate=48000, sample_width=2, show_debug=False)
+                    if not ok:
+                        st.error(text)
+                    else:
+                        st.session_state.setdefault("history", []).append(("You", text))
+                        reply = get_bot_reply(text)
+                        st.session_state["history"].append(("Bot", reply))
+                        audio_bytes = tts_bytes(reply)
+                        if audio_bytes:
+                            st.audio(audio_bytes, format="audio/mp3")
+            except Exception as e:
+                st.warning(f"Audio processing error: {e}")
+else:
+    # fallback: local desktop recording using sounddevice (existing behavior)
+    listen_btn = st.button("Listen (record)")
+    if listen_btn:
+        status.info("Recording...")
+        ok, wav = record_sound(duration=record_dur)
+        if not ok:
+            status.error(wav)
         else:
-            st.session_state['history'].append(("You", text))
-            status.success("Recognized: " + text)
-            reply = get_bot_reply(text)
-            st.session_state['history'].append(("Bot", reply))
-            audio_bytes = tts_bytes(reply)
-            if audio_bytes:
-                st.audio(audio_bytes, format="audio/mp3", autoplay=True)
+            status.info("Recognizing...")
+            ok2, text = recognize_from_bytes(wav, samplerate=SAMPLERATE)
+            if not ok2:
+                status.error(text)
             else:
-                st.warning("TTS failed or no internet for gTTS/ElevenLabs.")
+                st.session_state['history'].append(("You", text))
+                status.success("Recognized: " + text)
+                reply = get_bot_reply(text)
+                st.session_state['history'].append(("Bot", reply))
+                audio_bytes = tts_bytes(reply)
+                if audio_bytes:
+                    st.audio(audio_bytes, format="audio/mp3", autoplay=True)
+                else:
+                    st.warning("TTS failed or no internet for gTTS/ElevenLabs.")
+
+
 
 # Typed String
 if send_btn and typed.strip():

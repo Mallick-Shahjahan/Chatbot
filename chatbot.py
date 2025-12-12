@@ -3,14 +3,29 @@ import streamlit as st
 import time, io, os, sys, re
 from gtts import gTTS
 import numpy as np
-from dotenv import load_dotenv
+#from dotenv import load_dotenv
 import feedparser
 import pyjokes
 import ast
 import math
 
+def get_elevenlabs_key():
+    # 1) Try Streamlit Secrets
+    try:
+        key = st.secrets["ELEVENLABS_API_KEY"]
+        return key
+    except Exception:
+        pass
 
-load_dotenv()
+    # 2) Try environment variable
+    key = os.getenv("ELEVENLABS_API_KEY")
+    if key:
+        return key
+
+    # 3) No key found
+    return None
+
+#load_dotenv()
 
 # audio libs
 try:
@@ -127,8 +142,10 @@ st.sidebar.subheader("Text-to-Speech")
 tts_provider = st.sidebar.radio("TTS Provider", ["ElevenLabs (Premium)","gTTS (Free)"])
 
 if tts_provider == "ElevenLabs (Premium)":
-    if not os.getenv("ELEVENLABS_API_KEY"):
-        st.sidebar.warning(" Please set ELEVENLABS_API_KEY in your .env file")
+    if tts_provider == "ElevenLabs (Premium)":
+        api_key = get_elevenlabs_key()
+        if not api_key:
+            st.sidebar.warning("ElevenLabs API key not found. Using gTTS instead.")
 
 if st.sidebar.button("Clear Conversation"):
     st.session_state["history"] = []
@@ -154,27 +171,30 @@ status = st.empty()
 
 # Helpers
 
-def tts_bytes(text: str, lang=TTS_LANG):
+def tts_bytes(text: str, lang="en"):
     """
-    Generate audio bytes for the given text using the selected provider.
+    Generate audio using ElevenLabs if a key is available (via Streamlit secrets or env),
+    otherwise fall back to gTTS.
     """
-    if tts_provider == "ElevenLabs (Premium)":
-        api_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
-        if not api_key or api_key == "your_api_key_here":
-            st.error("⚠️ ElevenLabs API Key is missing or invalid in .env file.")
-            return None
+    api_key = get_elevenlabs_key()
+
+    # If we have an ElevenLabs API key → use premium TTS
+    if api_key:
         return tts_elevenlabs(text, api_key)
-    else:
-        # Fallback to gTTS
-        try:
-            t = gTTS(text=text, lang=lang)
-            buf = io.BytesIO()
-            t.write_to_fp(buf)
-            buf.seek(0)
-            return buf.read()
-        except Exception as e:
-            print("[tts_bytes] Exception:", e)
-            return None
+
+    # Otherwise → gTTS fallback
+    try:
+        from gtts import gTTS
+        import io
+        t = gTTS(text=text, lang=lang)
+        buf = io.BytesIO()
+        t.write_to_fp(buf)
+        buf.seek(0)
+        return buf.read()
+    except Exception as e:
+        print("gTTS failed:", e)
+        return None
+
 
 def tts_elevenlabs(text, api_key, voice_id="21m00Tcm4TlvDq8ikWAM"): # Rachel voice
     try:

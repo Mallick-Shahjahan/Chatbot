@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-# Install system packages required for PyAV, FFmpeg and soundfile
+# Install system packages needed for PyAV, FFmpeg, and soundfile
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       pkg-config \
@@ -19,18 +19,17 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-# Copy requirements first for better caching
 COPY requirements.txt .
 
-# Upgrade pip and install Python dependencies
+# Upgrade pip/wheel and install Cython before building PyAV
 RUN pip install --upgrade pip setuptools wheel
+RUN pip install "Cython==0.29.36"
+
+# Install Python dependencies (PyAV will use the preinstalled Cython)
 RUN pip install -r requirements.txt
 
-# Copy app code
 COPY . .
 
-# Expose Streamlit port
 EXPOSE 8501
 
-# Start Streamlit
 CMD ["streamlit", "run", "chatbot.py", "--server.port=8501", "--server.headless=true"]

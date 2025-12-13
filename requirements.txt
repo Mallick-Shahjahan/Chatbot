@@ -11,6 +11,5 @@ python-dotenv>=1.0.0
 feedparser>=6.0.10
 pyjokes>=0.6.0
 streamlit-webrtc==0.54.0
-av==10.0.0
+av==9.2.0
 pyee==9.0.4
-
